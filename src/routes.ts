@@ -12,8 +12,9 @@ const repo = 'github_commits';
 async function fetchCommits(since: string): Promise<number> {
     const url = `https://api.github.com/repos/${username}/${repo}/commits?since=${since}`;
     const response = await axios.get(url);
+    console.log(response.data)
     if (!response) return 0;
-    return response.data.length;
+    return response.data?.length;
 }
 
 // API endpoint to fetch and store GitHub commits in Supabase
@@ -39,6 +40,7 @@ async function fetchGithub(req: Request, res: Response){
         ]);
 
     if (error) {
+        console.log(error)
         return res.status(500).json({ error: 'Failed to update Supabase' });
     }
 
