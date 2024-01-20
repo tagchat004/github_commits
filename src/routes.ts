@@ -1,77 +1,68 @@
 import { Request, Response, Application } from 'express';
 import axios from 'axios';
 import { createClient } from '@supabase/supabase-js';
+import 'dotenv/config'
 
-const supabaseUrl = 'https://vhnqsqktwpcfynbusfkt.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZobnFzcWt0d3BjZnluYnVzZmt0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDU0Nzc3NDUsImV4cCI6MjAyMTA1Mzc0NX0.8Wv9tCksvw_95_sTHHFRi7QwT0J7ZYbAHinLLkv4ilY';
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
-const username = 'tagchat004';
-const repo = 'github_commits';
 
-// Fetch GitHub commits for a specific user
-async function fetchCommits(since: string): Promise<number> {
-    const url = `https://api.github.com/repos/${username}/${repo}/commits?since=${since}`;
-    const response = await axios.get(url);
-    console.log(response.data)
-    if (!response) return 0;
-    return response.data?.length;
-}
 
-// API endpoint to fetch and store GitHub commits in Supabase
-async function fetchGithub(req: Request, res: Response){
+async function getCommits(req: Request, res: Response) {
+    try {
+        const { data, error } = await supabase
+            .from('commits')
+            .select('*');
 
-    const today = new Date();
-    const startOfDay = new Date(today);
-    startOfDay.setUTCHours(0, 0, 0, 0);
+        if (error) {
+            throw error;
+        }
 
-    const commitsToday = await fetchCommits(startOfDay.toISOString());
-    const commitsThisWeek = await fetchCommits(getStartOfWeek(today).toISOString());
-    const commitsThisMonth = await fetchCommits(getStartOfMonth(today).toISOString());
-    const commitsThisYear = await fetchCommits(getStartOfYear(today).toISOString());
-
-    // Store the information in Supabase
-    const { data, error } = await supabase
-        .from('github_commits')
-        .upsert([
-            { username, commits_per_day: commitsToday },
-            { username, commits_per_week: commitsThisWeek },
-            { username, commits_per_month: commitsThisMonth },
-            { username, commits_per_year: commitsThisYear },
-        ]);
-
-    if (error) {
-        console.log(error)
-        return res.status(500).json({ error: 'Failed to update Supabase' });
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching commits from Supabase:', error);
+        res.status(500).send('Error fetching commits');
     }
+};
 
-    res.json({ data });
+async function addCommits(req: Request, res: Response) {
+    try {
+        const username = req.params.username;
+        const commits = await fetchGitHubCommits(username);
+        // Insert data into Supabase
+        for (const commit of commits) {
+            await supabase.from('commits').insert([commit]);
+        }
+        res.send('Commits fetched and inserted into Supabase');
+    } catch (error) {
+        console.error(error);
+        res.status(500).send('Error fetching commits');
+    }
+};
 
-}
-
-// Helper function to get the start of the week
-function getStartOfWeek(date: Date): Date {
-    const startOfWeek = new Date(date);
-    startOfWeek.setUTCDate(date.getUTCDate() - date.getUTCDay());
-    startOfWeek.setUTCHours(0, 0, 0, 0);
-    return startOfWeek;
-}
-
-// Helper function to get the start of the month
-function getStartOfMonth(date: Date): Date {
-    const startOfMonth = new Date(date);
-    startOfMonth.setUTCDate(1);
-    startOfMonth.setUTCHours(0, 0, 0, 0);
-    return startOfMonth;
-}
-
-// Helper function to get the start of the year
-function getStartOfYear(date: Date): Date {
-    const startOfYear = new Date(date);
-    startOfYear.setUTCMonth(0, 1);
-    startOfYear.setUTCHours(0, 0, 0, 0);
-    return startOfYear;
+const fetchGitHubCommits = async(username: string) => {
+    let commits: any = [];
+    const url = `https://api.github.com/users/${username}/repos`;
+    const response = await axios.get(url);
+    for (const repo of response.data) {
+        const repoURL = `https://api.github.com/repos/${username}/${repo.name}/commits`;
+        const responseRepo = await axios.get(repoURL);
+        // List commits for each repository
+        console.log(responseRepo)
+        for (const commit of responseRepo.data) {
+            const commitData: any = {
+                username: username,
+                repo: repo.name,
+                message: commit.commit.message,
+                committedDate: commit.commit.committer.date
+            };
+            commits.push(commitData);
+        }
+    }
+    return commits;
 }
 
 export const routes = (app: Application): void => {
-    app.get('/api/github', fetchGithub);
+    app.get('/api/github/commits', getCommits);
+    app.get('/api/github/commit/:username', addCommits);
 }
